@@ -1,0 +1,4 @@
+<resources>
+    <string name="app_name">DeepSight</string>
+    <string name="accessibility_description">Provides real-time AI image and video detection overlays.</string>
+</resources>
