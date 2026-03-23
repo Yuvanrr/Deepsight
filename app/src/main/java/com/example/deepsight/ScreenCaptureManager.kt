@@ -10,7 +10,10 @@ import android.media.projection.MediaProjection
 import android.os.Handler
 import android.os.Looper
 import android.util.DisplayMetrics
+import android.util.Log
 import android.view.WindowManager
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 
 /**
  * Manages screen capture using MediaProjection API.
@@ -27,61 +30,142 @@ class ScreenCaptureManager(
 
     private val metrics = DisplayMetrics()
     private val windowManager = context.getSystemService(Context.WINDOW_SERVICE) as WindowManager
+    
+    private var width: Int = 0
+    private var height: Int = 0
+    private var dpi: Int = 0
+    
+    private val captureMutex = Mutex()
+
+    companion object {
+        private const val TAG = "DeepSight"
+    }
 
     init {
         windowManager.defaultDisplay.getRealMetrics(metrics)
+        width = 480
+        height = (width * (metrics.heightPixels.toFloat() / metrics.widthPixels)).toInt()
+        dpi = metrics.densityDpi
     }
 
-    fun startCapture() {
-        // Use low resolution to conserve battery and memory
-        val width = 480
-        val height = (width * (metrics.heightPixels.toFloat() / metrics.widthPixels)).toInt()
-        val dpi = metrics.densityDpi
+    fun reset() {
+        Log.d(TAG, "ScreenCaptureManager reset")
+        virtualDisplay?.release()
+        imageReader?.close()
+        virtualDisplay = null
+        imageReader = null
+    }
 
-        imageReader = ImageReader.newInstance(width, height, PixelFormat.RGBA_8888, 2)
+    suspend fun initVirtualDisplay() = captureMutex.withLock {
+        Log.d(TAG, "initVirtualDisplay() called")
+        virtualDisplay?.release()
         
-        virtualDisplay = mediaProjection.createVirtualDisplay(
-            "DeepSightCapture",
-            width,
-            height,
-            dpi,
-            DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR,
-            imageReader?.surface,
-            null,
+        if (imageReader == null) {
+            imageReader = ImageReader.newInstance(width, height, PixelFormat.RGBA_8888, 2)
+            Log.d(TAG, "ImageReader created: ${imageReader != null}")
+        }
+        
+        // Android 14+ (API 34) requirement: registerCallback BEFORE createVirtualDisplay
+        mediaProjection.registerCallback(
+            object : MediaProjection.Callback() {
+                override fun onStop() {
+                    Log.d(TAG, "MediaProjection stopped by system")
+                    virtualDisplay?.release()
+                    virtualDisplay = null
+                    imageReader?.close()
+                    imageReader = null
+                }
+            },
             handler
         )
+        
+        try {
+            virtualDisplay = mediaProjection.createVirtualDisplay(
+                "DeepSightCapture",
+                width,
+                height,
+                dpi,
+                DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR,
+                imageReader?.surface,
+                null,
+                handler
+            )
+            Log.d(TAG, "VirtualDisplay init: ${virtualDisplay != null}")
+        } catch (e: Exception) {
+            Log.e(TAG, "VirtualDisplay failed: $e")
+        }
     }
 
-    fun acquireLatestBitmap(): Bitmap? {
-        val image = imageReader?.acquireLatestImage() ?: return null
-        
-        // Privacy Safeguard: Process only if content is not protected.
-        // FLAG_SECURE / DRM handling usually happens at the OS level (black frames), 
-        // but we can check for null/blank images if needed.
-        
-        val planes = image.planes
-        val buffer = planes[0].buffer
-        val pixelStride = planes[0].pixelStride
-        val rowStride = planes[0].rowStride
-        val rowPadding = rowStride - pixelStride * image.width
+    suspend fun startCapture() {
+        reset()
+        initVirtualDisplay()
+    }
 
-        val bitmap = Bitmap.createBitmap(
-            image.width + rowPadding / pixelStride,
-            image.height,
-            Bitmap.Config.ARGB_8888
-        )
-        bitmap.copyPixelsFromBuffer(buffer)
-        image.close()
+    suspend fun captureFrame(): Bitmap? = captureMutex.withLock {
+        Log.d(TAG, "captureFrame() entered on thread: ${Thread.currentThread().id}")
+        
+        if (virtualDisplay == null) {
+            Log.e(TAG, "FATAL: VirtualDisplay null, reinitializing")
+            // Re-init logic inside the lock (re-using part of initVirtualDisplay logic but without nested lock)
+            if (imageReader == null) {
+                imageReader = ImageReader.newInstance(width, height, PixelFormat.RGBA_8888, 2)
+            }
+            try {
+                virtualDisplay = mediaProjection.createVirtualDisplay(
+                    "DeepSightCapture",
+                    width, height, dpi,
+                    DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR,
+                    imageReader?.surface, null, handler
+                )
+            } catch (e: Exception) {
+                Log.e(TAG, "Recovery VirtualDisplay failed: $e")
+            }
+            return@withLock null
+        }
 
-        // Crop to actual size if there's padding
-        return if (rowPadding == 0) bitmap else Bitmap.createBitmap(bitmap, 0, 0, image.width, image.height)
+        val image = imageReader?.acquireLatestImage()
+        if (image == null) {
+            Log.d(TAG, "Image acquired: false")
+            return@withLock null
+        }
+        
+        try {
+            val planes = image.planes
+            val buffer = planes[0].buffer
+            val pixelStride = planes[0].pixelStride
+            val rowStride = planes[0].rowStride
+            val rowPadding = rowStride - pixelStride * image.width
+
+            val rawBitmap = Bitmap.createBitmap(
+                image.width + rowPadding / pixelStride,
+                image.height,
+                Bitmap.Config.ARGB_8888
+            )
+            rawBitmap.copyPixelsFromBuffer(buffer)
+            
+            // Crop to a perfect center square to prevent ML model aspect ratio distortion.
+            val size = Math.min(image.width, image.height)
+            val resultBitmap = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
+            val canvas = android.graphics.Canvas(resultBitmap)
+            val paint = android.graphics.Paint() // Removed color matrix
+            
+            val dx = -(image.width - size) / 2f
+            val dy = -(image.height - size) / 2f
+            canvas.drawBitmap(rawBitmap, dx, dy, paint)
+            rawBitmap.recycle()
+            
+            Log.d(TAG, "Bitmap created: true")
+            return@withLock resultBitmap
+        } catch (e: Exception) {
+            Log.e(TAG, "Error processing captured frame", e)
+            return@withLock null
+        } finally {
+            image.close()
+        }
     }
 
     fun stopCapture() {
-        virtualDisplay?.release()
-        virtualDisplay = null
-        imageReader?.close()
-        imageReader = null
-        mediaProjection.stop()
+        reset()
+        Log.d(TAG, "ScreenCaptureManager stopped")
     }
 }

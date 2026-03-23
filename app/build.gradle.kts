@@ -52,9 +52,17 @@ dependencies {
     implementation(libs.androidx.compose.ui.tooling.preview)
     implementation(libs.androidx.compose.material3)
     
+    // Navigation
+    implementation("androidx.navigation:navigation-compose:2.8.3")
+    
+    // Coil for image loading (icons)
+    implementation("io.coil-kt:coil-compose:2.5.0")
+    
     // TFLite dependencies
     implementation(libs.tensorflow.lite)
     implementation(libs.tensorflow.lite.support)
+    // Adding gpu-api specifically as it contains the delegate factory options causing the crash
+    implementation("org.tensorflow:tensorflow-lite-gpu-api:2.17.0")
     implementation(libs.tensorflow.lite.gpu)
 
     testImplementation(libs.junit)

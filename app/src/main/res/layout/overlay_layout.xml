@@ -11,6 +11,16 @@
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         android:textColor="#FFFFFF"
-        android:textSize="12sp"
+        android:textSize="14sp"
+        android:textStyle="bold"
         android:text="DeepSight Active" />
+
+    <TextView
+        android:id="@+id/warningText"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:textColor="#FFFF00"
+        android:textSize="10sp"
+        android:visibility="gone"
+        android:text="Simulation Mode" />
 </LinearLayout>

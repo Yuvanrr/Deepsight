@@ -1,6 +1,7 @@
 package com.example.deepsight
 
 import android.graphics.Bitmap
+import android.util.Log
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -15,59 +16,64 @@ import java.util.LinkedList
  */
 class FrameProcessor(
     private val mlManager: MLInferenceManager,
-    private val onStatusUpdate: (OverlayService.DetectionStatus) -> Unit
+    private val onStatusUpdate: (OverlayService.DetectionStatus, Boolean) -> Unit
 ) {
     private val scope = CoroutineScope(Dispatchers.Default)
     private var processingJob: Job? = null
     
-    // Rolling buffer for video frame smoothing (last 5 results)
-    private val videoResultsBuffer = LinkedList<Float>()
+    // Rolling buffer for frame smoothing (last 5 results)
+    private val resultsBuffer = LinkedList<Float>()
     private val BUFFER_SIZE = 5
 
-    fun startProcessing(frameProvider: () -> Bitmap?) {
+    fun startProcessing(frameProvider: suspend () -> Bitmap?) {
         processingJob = scope.launch {
             while (true) {
                 val bitmap = frameProvider()
                 if (bitmap != null) {
                     processFrame(bitmap)
-                    // Privacy Safeguard: Bitmap should be recycled or left for GC immediately
-                    // No storage or logging of the frame data.
                 }
-                delay(1000L / 2) // ~2 FPS to conserve battery
+                delay(500) // ~2 FPS
             }
         }
     }
 
     fun stopProcessing() {
         processingJob?.cancel()
-        videoResultsBuffer.clear()
+        resultsBuffer.clear()
+    }
+
+    fun processSingleFrame(bitmap: Bitmap) {
+        scope.launch {
+            processFrame(bitmap)
+        }
     }
 
     private fun processFrame(bitmap: Bitmap) {
-        // Run inference (placeholder logic)
-        // In a real app, we might check if the current screen content is a video or image.
-        val imageProb = mlManager.analyzeImage(bitmap)
-        val videoProb = mlManager.analyzeVideoFrame(bitmap)
+        // Run inference using the new model
+        val aiProbability = mlManager.analyze(bitmap)
+        val isSimulation = mlManager.isRunningInSimulationMode()
         
-        // Simple fusion / decision logic
-        val finalProb = (imageProb + videoProb) / 2
+        // Prevent memory thrashing by explicitly recycling the bitmap after use
+        bitmap.recycle()
         
-        updateVideoBuffer(finalProb)
-        val smoothedProb = videoResultsBuffer.average().toFloat()
+        updateBuffer(aiProbability)
+        val smoothedProb = resultsBuffer.average().toFloat()
+
+        Log.d("DeepSight_FP", "AI Prob: $aiProbability, Smoothed: $smoothedProb")
 
         val status = when {
-            smoothedProb >= 0.75f -> OverlayService.DetectionStatus.LIKELY_AI
-            smoothedProb <= 0.35f -> OverlayService.DetectionStatus.LIKELY_REAL
+            smoothedProb >= 0.60f -> OverlayService.DetectionStatus.LIKELY_AI
+            smoothedProb <= 0.40f -> OverlayService.DetectionStatus.LIKELY_REAL
             else -> OverlayService.DetectionStatus.UNCERTAIN
         }
         
-        onStatusUpdate(status)
+        onStatusUpdate(status, isSimulation)
     }
 
-    private fun updateVideoBuffer(prob: Float) {
-        videoResultsBuffer.add(prob)
-        if (videoResultsBuffer.size > BUFFER_SIZE) {
-            videoResultsBuffer.removeFirst()
+    private fun updateBuffer(prob: Float) {
+        resultsBuffer.add(prob)
+        if (resultsBuffer.size > BUFFER_SIZE) {
+            resultsBuffer.removeFirst()
         }
     }
 }
