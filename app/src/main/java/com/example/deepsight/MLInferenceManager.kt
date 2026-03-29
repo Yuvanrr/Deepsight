@@ -14,7 +14,7 @@ import java.nio.MappedByteBuffer
 
 /**
  * Manages on-device TFLite inference for deepfake detection.
- * Loads the best_phase2.tflite model.
+ * Loads the best_model_v2.tflite model.
  */
 class MLInferenceManager(private val context: Context) {
 
@@ -24,7 +24,7 @@ class MLInferenceManager(private val context: Context) {
 
     companion object {
         private const val TAG = "DeepSight_ML"
-        private const val MODEL_FILE = "best_phase2.tflite"
+        private const val MODEL_FILE = "best_model_v2.tflite"
     }
 
     init {
@@ -66,7 +66,11 @@ class MLInferenceManager(private val context: Context) {
         
         try {
             interpreter.run(tensorImage.buffer, output)
-            return output[0][0]
+            val rawOutput = output[0][0]
+            // best_model_v2: trained with fake=0, real=1 → invert to get AI probability
+            val aiProb = 1.0f - rawOutput
+            Log.d(TAG, "Raw model output: $rawOutput (real prob) -> AI prob: $aiProb")
+            return aiProb
         } catch (e: Exception) {
             Log.e(TAG, "Inference failed", e)
             return 0.5f
@@ -76,8 +80,7 @@ class MLInferenceManager(private val context: Context) {
     private fun preprocessImage(bitmap: Bitmap): TensorImage {
         val imageProcessor = ImageProcessor.Builder()
             .add(ResizeOp(224, 224, ResizeOp.ResizeMethod.BILINEAR))
-            // (x - 127.5) / 127.5
-            .add(NormalizeOp(127.5f, 127.5f))
+            // EfficientNetV2B0 has an internal Rescaling layer, feed raw [0, 255] float pixels
             .build()
 
         val tensorImage = TensorImage(org.tensorflow.lite.DataType.FLOAT32)

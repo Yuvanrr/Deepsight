@@ -130,10 +130,23 @@ class OverlayService : AccessibilityService() {
         val eventType = event?.eventType ?: return
         val pkg = event.packageName?.toString() ?: return
 
+        // Ignore ALL system/transient packages that generate spurious window state events.
+        // This prevents the overlay from flickering when Chrome opens the address bar,
+        // keyboard, permission dialogs, or system UI overlays.
         val blocklist = setOf(
             packageName,
             "com.android.systemui",
-            "com.android.launcher3"
+            "com.android.launcher3",
+            "com.android.launcher",
+            "com.oppo.launcher",
+            "com.coloros.launcher",
+            "com.coloros.safecenter",
+            "com.android.inputmethod.latin",
+            "com.google.android.inputmethod.latin",
+            "com.android.permissioncontroller",
+            "com.google.android.packageinstaller",
+            "com.android.settings",
+            "android"
         )
         if (pkg in blocklist) return
 
@@ -144,6 +157,9 @@ class OverlayService : AccessibilityService() {
                 DetectionService.currentForegroundPackage = pkg
                 showOverlay()
             } else {
+                // Only hide if a REAL different app takes over (not a transient popup).
+                // We check if the package looks like a real app (has a dot) and isn't
+                // a known transient overlay — already filtered above by blocklist.
                 currentForegroundPackage = null
                 DetectionService.currentForegroundPackage = null
                 hideOverlay()

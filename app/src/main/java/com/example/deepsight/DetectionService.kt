@@ -40,7 +40,7 @@ class DetectionService : Service() {
     override fun onCreate() {
         super.onCreate()
         Log.d(TAG, "DetectionService onCreate")
-        mlInferenceManager = MLInferenceManager(this)
+        // mlInferenceManager is initialized lazily in onStartCommand on a background thread
         appPreferences = AppPreferences(this)
         createNotificationChannel()
     }
@@ -112,14 +112,21 @@ class DetectionService : Service() {
         }
 
         val projectionManager = getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
-        mediaProjection = projectionManager.getMediaProjection(resultCode, data)
+       mediaProjection = projectionManager.getMediaProjection(resultCode, data)
         
         if (mediaProjection != null) {
-            setupDetection(mediaProjection!!)
             isRunning = true
-            
-            // Use Bridge to Emit SHOW command
+            // Emit SHOW command while model loads in background
             OverlayBridge.overlayCommandFlow.tryEmit(OverlayBridge.OverlayCommand.SHOW)
+            serviceScope?.launch(Dispatchers.IO) {
+                // Load model on IO thread to avoid blocking the main thread (prevents 2.6s ANR)
+                Log.d(TAG, "Loading ML model on background thread...")
+                mlInferenceManager = MLInferenceManager(this@DetectionService)
+                withContext(Dispatchers.Main) {
+                    Log.d(TAG, "ML model loaded, starting detection")
+                    setupDetection(mediaProjection!!)
+                }
+            }
         } else {
             stopSelf()
         }

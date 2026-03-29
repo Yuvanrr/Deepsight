@@ -1,4 +1,4 @@
-plugins {
+ plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.compose)
@@ -64,6 +64,9 @@ dependencies {
     // Adding gpu-api specifically as it contains the delegate factory options causing the crash
     implementation("org.tensorflow:tensorflow-lite-gpu-api:2.17.0")
     implementation(libs.tensorflow.lite.gpu)
+    
+    // ML Kit for Face Detection Phase 1
+    implementation("com.google.mlkit:face-detection:16.1.6")
 
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)

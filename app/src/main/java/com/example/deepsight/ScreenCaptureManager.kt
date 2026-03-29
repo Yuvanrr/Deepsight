@@ -147,7 +147,15 @@ class ScreenCaptureManager(
             val size = Math.min(image.width, image.height)
             val resultBitmap = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
             val canvas = android.graphics.Canvas(resultBitmap)
-            val paint = android.graphics.Paint() // Removed color matrix
+            val paint = android.graphics.Paint()
+            // Fix RGBA_8888 to ARGB_8888 Red/Blue color swap
+            val colorMatrix = android.graphics.ColorMatrix(floatArrayOf(
+                0f, 0f, 1f, 0f, 0f,  // Red channel <- Blue
+                0f, 1f, 0f, 0f, 0f,  // Green channel <- Green
+                1f, 0f, 0f, 0f, 0f,  // Blue channel <- Red
+                0f, 0f, 0f, 1f, 0f   // Alpha channel <- Alpha
+            ))
+            paint.colorFilter = android.graphics.ColorMatrixColorFilter(colorMatrix)
             
             val dx = -(image.width - size) / 2f
             val dy = -(image.height - size) / 2f
