@@ -1,7 +1,7 @@
 DeepSight
 > **Real-time on-device synthetic content detection for Android**
 DeepSight is an Android application that detects AI-generated and deepfake content directly on the device — no cloud calls, no latency overhead. It runs a dual-model TFLite pipeline over live screen captures using the MediaProjection API, classifying both images and video streams in real time.
-Accepted to RC 2026 (IEEE).
+Accepted to RC 2026 (PSG RC).
 ---
 How It Works
 DeepSight intercepts screen content via Android's MediaProjection API and routes frames through two independent models depending on content type:
